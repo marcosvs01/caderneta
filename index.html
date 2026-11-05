@@ -74,6 +74,8 @@ dialog h3{margin:0 0 4px}
     </div>
     <h2>Clima</h2>
     <div id="clima"></div>
+    <h2>Frente de serviço</h2>
+    <div class="chips" id="frenteChips"></div>
     <h2>Equipamento ou equipe</h2>
     <div class="chips" id="equipChips"></div>
     <p class="hint" id="equipHint" hidden>Cadastre seus equipamentos e equipes em Ajustes.</p>
@@ -113,6 +115,9 @@ dialog h3{margin:0 0 4px}
   <section id="tab-ajustes" hidden>
     <label for="cfgObra" style="margin-top:4px">Cabeçalho da obra</label>
     <input id="cfgObra">
+    <label for="cfgFrentes">Frentes de serviço</label>
+    <textarea id="cfgFrentes" rows="5"></textarea>
+    <p class="hint">Uma por linha. Para subserviço, use: Terraplanagem &gt; Limpeza.</p>
     <label for="cfgEquip">Equipamentos e equipes</label>
     <textarea id="cfgEquip" rows="12" style="min-height:240px" placeholder="EH0000 | Caiapó | Escavadeira hidráulica"></textarea>
     <p class="hint">Uma linha para cada: prefixo | Caiapó ou Terceiro | descrição. Deixe o meio vazio se não souber.</p>
@@ -185,16 +190,18 @@ const DEFAULTS = {
   v:1,
   cfg:{
     obra:'NOME DA OBRA',
+    frentes:['Terraplanagem','Terraplanagem > Limpeza','Obra de arte corrente','Obra de arte especial'],
     equip:[],
     causes:['Falta de caminhão','Material com alta umidade','Mobilização de equipamento','Início tardio do carregamento','Aguardando peça']
   },
   clima:{}, notes:[], occs:[]
 };
 function clone(o){ return JSON.parse(JSON.stringify(o)); }
+function migrate(s){ if(!Array.isArray(s.cfg.frentes)) s.cfg.frentes=clone(DEFAULTS.cfg.frentes); return s; }
 function load(){
   try{
     const raw = localStorage.getItem(KEY);
-    if(raw){ const s=JSON.parse(raw); if(s && s.cfg && Array.isArray(s.notes) && Array.isArray(s.occs)) return s; }
+    if(raw){ const s=JSON.parse(raw); if(s && s.cfg && Array.isArray(s.notes) && Array.isArray(s.occs)) return migrate(s); }
   }catch(e){}
   return clone(DEFAULTS);
 }
@@ -212,7 +219,7 @@ function askPersist(){
 const hour = new Date().getHours();
 let noteDate = today(), copyDate = hour<12 ? addDays(today(),-1) : today();
 let noteDateTouched=false, copyDateTouched=false, timeTouched=false;
-let selEquip = GENERAL, selType = 'Observação';
+let selEquip = GENERAL, selType = 'Observação', selFrente = '';
 
 const sortNotes = (a,b)=> (a.date+(a.time||'')).localeCompare(b.date+(b.time||''));
 const equipInfo = code => S.cfg.equip.find(e=>e.code===code) || {code,owner:'',desc:''};
@@ -254,11 +261,14 @@ $('clima').onclick = e=>{
 function renderChips(){
   const list=[GENERAL].concat(S.cfg.equip.map(e=>e.code));
   if(!list.includes(selEquip)) selEquip=GENERAL;
+  if(!S.cfg.frentes.includes(selFrente)) selFrente='';
+  $('frenteChips').innerHTML = S.cfg.frentes.map(f=>'<button data-f="'+esc(f)+'" class="'+(f===selFrente?'on':'')+'" aria-pressed="'+(f===selFrente)+'">'+esc(f)+'</button>').join('');
   $('equipHint').hidden = S.cfg.equip.length>0;
   $('equipChips').innerHTML = list.map(c=>'<button data-c="'+esc(c)+'" class="'+(c===selEquip?'on':'')+'" aria-pressed="'+(c===selEquip)+'">'+esc(c)+'</button>').join('');
   $('typeChips').innerHTML = TYPES.map(t=>'<button data-t="'+t+'" class="'+(t===selType?'on':'')+'" aria-pressed="'+(t===selType)+'">'+t+'</button>').join('');
   $('causeChips').innerHTML = S.cfg.causes.map(c=>'<button class="cause" data-a="'+esc(c)+'">'+esc(c)+'</button>').join('');
 }
+$('frenteChips').onclick = e=>{ const b=e.target.closest('button'); if(b){ selFrente = selFrente===b.dataset.f ? '' : b.dataset.f; renderChips(); } };
 $('equipChips').onclick = e=>{ const b=e.target.closest('button'); if(b){ selEquip=b.dataset.c; renderChips(); } };
 $('typeChips').onclick = e=>{ const b=e.target.closest('button'); if(b){ selType=b.dataset.t; renderChips(); } };
 $('causeChips').onclick = e=>{
@@ -282,7 +292,7 @@ function renderDay(){
   $('dayList').innerHTML = list.length ? list.map(noteHtml).join('') : '<p class="empty">Nenhuma anotação neste dia.</p>';
 }
 function noteHtml(n){
-  return '<div class="note"><div class="meta">'+esc(n.time||'--:--')+' · '+esc(n.equip)+' · '+esc(n.closes?'Baixa':n.type)+'</div>'+
+  return '<div class="note"><div class="meta">'+esc(n.time||'--:--')+' · '+(n.frente?esc(n.frente)+' · ':'')+esc(n.equip)+' · '+esc(n.closes?'Baixa':n.type)+'</div>'+
     '<div class="txt">'+esc(n.text)+'</div>'+
     '<div class="acts"><button data-edit="'+n.id+'">Editar</button><button data-del="'+n.id+'">Excluir</button></div></div>';
 }
@@ -291,6 +301,7 @@ $('saveNote').onclick = ()=>{
   if(!text){ toast('Escreva o que aconteceu antes de salvar.'); $('noteText').focus(); return; }
   if(selType==='Mecânica' && selEquip===GENERAL){ toast('Escolha o equipamento para registrar a ocorrência mecânica.'); return; }
   const n={id:uid(),date:noteDate,time:$('noteTime').value,type:selType,equip:selEquip,text};
+  if(selFrente) n.frente=selFrente;
   let msg='Anotação salva.';
   if(selType==='Mecânica'){
     let o=S.occs.find(x=>x.equip===selEquip && !x.closedOn && x.start<=noteDate);
@@ -299,7 +310,7 @@ $('saveNote').onclick = ()=>{
     n.occId=o.id;
   }
   S.notes.push(n); save(); askPersist();
-  $('noteText').value=''; timeTouched=false; selEquip=GENERAL; selType='Observação';
+  $('noteText').value=''; timeTouched=false; selEquip=GENERAL; selType='Observação'; selFrente='';
   renderAll(); toast(msg);
 };
 function delNote(id){
@@ -390,17 +401,27 @@ function dayText(d){
   out.push('CLIMA → MANHÃ: '+up(c.m)+' | TARDE: '+up(c.t));
   const day=S.notes.filter(n=>n.date===d && !n.occId).sort(sortNotes);
   const line=n=>(n.time||'--:--')+' – '+n.text;
-  const gen=day.filter(n=>n.type!=='Chuva' && n.equip===GENERAL);
+  const gen=day.filter(n=>n.type!=='Chuva' && n.equip===GENERAL && !n.frente);
   const rain=day.filter(n=>n.type==='Chuva');
-  const eq=day.filter(n=>n.type!=='Chuva' && n.equip!==GENERAL);
+  const tagged=(n)=>(n.time||'--:--')+' ['+n.type+'] '+n.text;
+  const byEquip=list=>[...new Set(list.map(n=>n.equip))].forEach(code=>{
+    out.push('',code);
+    list.filter(n=>n.equip===code).forEach(n=>out.push(tagged(n)));
+  });
+  const inF=day.filter(n=>n.type!=='Chuva' && n.frente);
+  const fronts=S.cfg.frentes.filter(f=>inF.some(n=>n.frente===f)).concat([...new Set(inF.map(n=>n.frente))].filter(f=>!S.cfg.frentes.includes(f)));
+  const eq=day.filter(n=>n.type!=='Chuva' && n.equip!==GENERAL && !n.frente);
   if(gen.length){ out.push('','OBSERVAÇÕES GERAIS'); gen.forEach(n=>out.push(line(n))); }
-  if(rain.length){ out.push('','CHUVA'); rain.forEach(n=>out.push((n.equip!==GENERAL?n.equip+' – ':'')+line(n))); }
+  if(rain.length){ out.push('','CHUVA'); rain.forEach(n=>out.push((n.frente?n.frente+' – ':'')+(n.equip!==GENERAL?n.equip+' – ':'')+line(n))); }
+  fronts.forEach(f=>{
+    out.push('','FRENTE: '+f.toUpperCase());
+    const list=inF.filter(n=>n.frente===f);
+    list.filter(n=>n.equip===GENERAL).forEach(n=>out.push(tagged(n)));
+    byEquip(list.filter(n=>n.equip!==GENERAL));
+  });
   if(eq.length){
-    out.push('','PRODUÇÃO E PARADAS POR EQUIPAMENTO');
-    [...new Set(eq.map(n=>n.equip))].forEach(code=>{
-      out.push('',code);
-      eq.filter(n=>n.equip===code).forEach(n=>out.push((n.time||'--:--')+' ['+n.type+'] '+n.text));
-    });
+    out.push('','SEM FRENTE INFORMADA');
+    byEquip(eq);
   }
   const occs=S.occs.filter(o=>o.start<=d && (!o.closedOn || o.closedOn>=d));
   [['Caiapó','OCORRÊNCIAS MECÂNICAS – CAIAPÓ'],['Terceiro','OCORRÊNCIAS MECÂNICAS – TERCEIROS'],['','OCORRÊNCIAS MECÂNICAS – SEM CLASSIFICAÇÃO']].forEach(([own,title])=>{
@@ -411,7 +432,7 @@ function dayText(d){
       const i=equipInfo(o.equip);
       const done=o.closedOn && o.closedOn<=d;
       out.push('',o.equip+(i.desc?' – '+i.desc.toUpperCase():'')+' ('+(done?'baixa em '+brShort(o.closedOn):'aberta desde '+brShort(o.start))+')');
-      S.notes.filter(n=>n.occId===o.id && n.date<=d).sort(sortNotes).forEach(n=>out.push(brShort(n.date)+(n.time?' '+n.time:'')+' – '+n.text));
+      S.notes.filter(n=>n.occId===o.id && n.date<=d).sort(sortNotes).forEach(n=>out.push(brShort(n.date)+(n.time?' '+n.time:'')+(n.frente?' ['+n.frente+']':'')+' – '+n.text));
     });
   });
   if(!day.length && !occs.length) out.push('','Sem anotações neste dia.');
@@ -445,6 +466,7 @@ if(navigator.share){
 /* ---------- ajustes ---------- */
 function renderCfg(){
   $('cfgObra').value=S.cfg.obra;
+  $('cfgFrentes').value=S.cfg.frentes.join('\n');
   $('cfgEquip').value=S.cfg.equip.map(e=>[e.code,e.owner,e.desc].join(' | ')).join('\n');
   $('cfgCausas').value=S.cfg.causes.join('\n');
 }
@@ -457,6 +479,7 @@ $('saveCfg').onclick=()=>{
   if(new Set(eq.map(e=>e.code)).size!==eq.length){ toast('Há prefixos repetidos na lista. Deixe só uma linha para cada.'); return; }
   S.cfg.obra=$('cfgObra').value.trim()||S.cfg.obra;
   S.cfg.equip=eq;
+  S.cfg.frentes=[...new Set($('cfgFrentes').value.split('\n').map(l=>l.trim()).filter(Boolean))];
   S.cfg.causes=$('cfgCausas').value.split('\n').map(l=>l.trim()).filter(Boolean);
   save(); renderAll(); toast('Ajustes salvos.');
 };
@@ -473,7 +496,7 @@ $('restoreFile').onchange=async e=>{
   try{
     const s=JSON.parse(await f.text());
     if(!s.cfg||!Array.isArray(s.notes)||!Array.isArray(s.occs)) throw 0;
-    const snap=clone(S); S=s; save(); renderAll(); toast('Cópia restaurada.',snap);
+    const snap=clone(S); S=migrate(s); save(); renderAll(); toast('Cópia restaurada.',snap);
   }catch(err){ toast('Esse arquivo não é uma cópia da caderneta.'); }
 };
 

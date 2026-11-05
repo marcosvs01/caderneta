@@ -1,4 +1,4 @@
-const CACHE = 'caderneta-1';
+const CACHE = 'caderneta-2';
 const FILES = ['./','index.html','manifest.webmanifest','icon-192.png','icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
